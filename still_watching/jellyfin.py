@@ -10,9 +10,16 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT_SECONDS = 10
 MESSAGE_HEADER = "Still Watching"
-MESSAGE_TIMEOUT_MS = 7000
-MESSAGE_LEAD_SECONDS = 5
+MILLISECONDS_PER_SECOND = 1000
 GO_HOME_DELAY_SECONDS = 2
+
+# Some clients (Jellyfin for Android TV) ignore TimeoutMs and show a message for a short fixed
+# time, so the message is resent to keep it on screen. Each copy still carries a timeout matching
+# the resend interval, so clients that honor it show one continuous message instead of stacking
+# copies or holding one indefinitely.
+MESSAGE_REPEAT_COUNT = 5
+MESSAGE_REPEAT_INTERVAL_SECONDS = 3
+MESSAGE_TIMEOUT_MS = MESSAGE_REPEAT_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND
 
 
 class JellyfinClient:
@@ -44,25 +51,36 @@ class JellyfinClient:
             },
         )
 
+    def _stop_playback(self, session_id):
+        if self._settings.stop_action == STOP_ACTION_STOP:
+            self._post(f"/Sessions/{session_id}/Playing/Stop")
+            self._sleep(GO_HOME_DELAY_SECONDS)
+            self._post(f"/Sessions/{session_id}/Command/GoHome")
+        else:
+            self._post(f"/Sessions/{session_id}/Playing/Pause")
+
+    def _repeat_message(self, session_id):
+        for attempt in range(MESSAGE_REPEAT_COUNT):
+            if attempt:
+                self._sleep(MESSAGE_REPEAT_INTERVAL_SECONDS)
+
+            try:
+                self.display_message(session_id)
+            except requests.RequestException as error:
+                logger.warning("Could not show the message on session %s: %s", session_id, error)
+                return
+
     def ask_still_watching(self, session_id):
-        """Show the still-watching message, then pause or stop the session."""
-        try:
-            self.display_message(session_id)
-        except requests.RequestException as error:
-            logger.warning("Could not show the message on session %s: %s", session_id, error)
-
-        self._sleep(MESSAGE_LEAD_SECONDS)
+        """Pause or stop the session, then keep the still-watching message on screen."""
+        stopped = True
 
         try:
-            if self._settings.stop_action == STOP_ACTION_STOP:
-                self._post(f"/Sessions/{session_id}/Playing/Stop")
-                self._sleep(GO_HOME_DELAY_SECONDS)
-                self._post(f"/Sessions/{session_id}/Command/GoHome")
-            else:
-                self._post(f"/Sessions/{session_id}/Playing/Pause")
+            self._stop_playback(session_id)
         except requests.RequestException as error:
             logger.error("Could not %s session %s: %s", self._settings.stop_action.lower(), session_id, error)
-            return False
+            stopped = False
+        else:
+            logger.info("Sent %s to session %s", self._settings.stop_action, session_id)
 
-        logger.info("Sent %s to session %s", self._settings.stop_action, session_id)
-        return True
+        self._repeat_message(session_id)
+        return stopped

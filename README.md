@@ -8,11 +8,11 @@ Forked from [joshjryan/sleep-timer](https://github.com/joshjryan/sleep-timer).
 
 still-watching follows each user on each device separately and counts runs of episodes.
 
-- **An episode counts once it has played for a minute** (`START_DELAY_SECONDS`). Stopping it, or starting something else, inside that minute means it never counted, so skipping through episodes does not build up a run.
-- **The next episode continues the run if it starts within 10 minutes of the previous one ending** (`RUN_GAP_MINUTES`). The end comes from the `PlaybackStop` event. If no stop arrives, for example because the client disappeared, the previous episode is assumed to have ended at its start plus its running time.
+- **An episode counts once it has played for a minute** (`STILL_WATCHING_START_DELAY_SECONDS`). Stopping it, or starting something else, inside that minute means it never counted, so skipping through episodes does not build up a run.
+- **The next episode continues the run if it starts within 10 minutes of the previous one ending** (`STILL_WATCHING_RUN_GAP_MINUTES`). The end comes from the `PlaybackStop` event. If no stop arrives, for example because the client disappeared, the previous episode is assumed to have ended at its start plus its running time.
 - **A different series, or any movie, starts a new run.**
 - **Resuming an episode that already counted does not count it again**, whether it was paused or stopped and restarted.
-- **When an episode would make the run longer than 4** (`RUN_LENGTH`), once that episode has played for the start delay, still-watching shows "Are you still watching?" on the client and then pauses it (`JELLYFIN_STOP_ACTION`). That episode becomes the first of a new run, so resuming it gives another full run before the next prompt.
+- **When an episode would make the run longer than 4** (`STILL_WATCHING_RUN_LENGTH`), once that episode has played for the start delay, still-watching shows "Are you still watching?" on the client and then pauses it (`JELLYFIN_STOP_ACTION`). That episode becomes the first of a new run, so resuming it gives another full run before the next prompt.
 
 With the defaults, four back-to-back episodes play through, and the fifth pauses a minute in.
 
@@ -36,9 +36,9 @@ Run counts live in memory, so restarting the container resets them.
 |---|---|---|---|
 | `JELLYFIN_API_URL` | yes | | Jellyfin server address, e.g. `http://jellyfin:8096` |
 | `JELLYFIN_API_TOKEN` | yes | | Jellyfin API key, sent as `Authorization: MediaBrowser Token="…"` |
-| `RUN_LENGTH` | no | `4` | Episodes in a row allowed before asking |
-| `RUN_GAP_MINUTES` | no | `10` | Longest break between one episode ending and the next starting that still continues a run |
-| `START_DELAY_SECONDS` | no | `60` | How long an episode must play before it counts |
+| `STILL_WATCHING_RUN_LENGTH` | no | `4` | Episodes in a row allowed before asking |
+| `STILL_WATCHING_RUN_GAP_MINUTES` | no | `10` | Longest break between one episode ending and the next starting that still continues a run |
+| `STILL_WATCHING_START_DELAY_SECONDS` | no | `60` | How long an episode must play before it counts |
 | `JELLYFIN_MESSAGE` | no | `Are you still watching?` | Message shown on the client |
 | `JELLYFIN_STOP_ACTION` | no | `PAUSE` | `PAUSE`, or `STOP` to stop playback and return the client to its home screen |
 
@@ -54,9 +54,9 @@ services:
     environment:
       JELLYFIN_API_URL: "http://jellyfin:8096"
       JELLYFIN_API_TOKEN: "<api key>"
-      RUN_LENGTH: 4
-      RUN_GAP_MINUTES: 10
-      START_DELAY_SECONDS: 60
+      STILL_WATCHING_RUN_LENGTH: 4
+      STILL_WATCHING_RUN_GAP_MINUTES: 10
+      STILL_WATCHING_START_DELAY_SECONDS: 60
       JELLYFIN_STOP_ACTION: "PAUSE"
     restart: unless-stopped
 ```

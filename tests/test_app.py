@@ -91,7 +91,7 @@ def test_settings_defaults_and_validation():
         load_settings({"JELLYFIN_API_URL": "http://jf"})
 
     with pytest.raises(ConfigError):
-        load_settings({"JELLYFIN_API_URL": "http://jf", "JELLYFIN_API_TOKEN": "t", "RUN_LENGTH": "0"})
+        load_settings({"JELLYFIN_API_URL": "http://jf", "JELLYFIN_API_TOKEN": "t", "STILL_WATCHING_RUN_LENGTH": "0"})
 
     with pytest.raises(ConfigError):
         load_settings({"JELLYFIN_API_URL": "http://jf", "JELLYFIN_API_TOKEN": "t", "JELLYFIN_STOP_ACTION": "EJECT"})
@@ -137,3 +137,17 @@ def test_ask_can_stop_and_go_home():
 
     urls = [call[0] for call in http.calls]
     assert urls[1:] == ["http://jf/Sessions/s1/Playing/Stop", "http://jf/Sessions/s1/Command/GoHome"]
+
+
+def test_settings_read_prefixed_run_keys():
+    settings = load_settings({
+        "JELLYFIN_API_URL": "http://jf",
+        "JELLYFIN_API_TOKEN": "t",
+        "STILL_WATCHING_RUN_LENGTH": "6",
+        "STILL_WATCHING_RUN_GAP_MINUTES": "15",
+        "STILL_WATCHING_START_DELAY_SECONDS": "30",
+    })
+
+    assert settings.run_length == 6
+    assert settings.run_gap_seconds == 900
+    assert settings.start_delay_seconds == 30

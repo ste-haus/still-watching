@@ -12,7 +12,7 @@ still-watching follows each user on each device separately and counts runs of ep
 - **The next episode continues the run if it starts within 10 minutes of the previous one ending** (`STILL_WATCHING_RUN_GAP_MINUTES`). The end comes from the `PlaybackStop` event. If no stop arrives, for example because the client disappeared, the previous episode is assumed to have ended at its start plus its running time.
 - **A different series, or any movie, starts a new run.**
 - **Resuming an episode that already counted does not count it again**, whether it was paused or stopped and restarted.
-- **When an episode would make the run longer than 4** (`STILL_WATCHING_RUN_LENGTH`), once that episode has played for the start delay, still-watching shows "Are you still watching?" on the client and then pauses it (`JELLYFIN_STOP_ACTION`). That episode becomes the first of a new run, so resuming it gives another full run before the next prompt.
+- **When an episode would make the run longer than 4** (`STILL_WATCHING_RUN_LENGTH`), once that episode has played for the start delay, still-watching pauses the client (`JELLYFIN_STOP_ACTION`) and then shows "Are you still watching?" on it. The message is sent five times, three seconds apart, because some clients (Jellyfin for Android TV) ignore the requested display time and only show a message briefly. Each copy asks for a three second display, so clients that honor it show one continuous message for about fifteen seconds. That episode becomes the first of a new run, so resuming it gives another full run before the next prompt.
 
 With the defaults, four back-to-back episodes play through, and the fifth pauses a minute in.
 

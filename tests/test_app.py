@@ -1,11 +1,17 @@
 import json
 
 import pytest
+import requests
 
 from still_watching.app import create_app
 from still_watching.config import ConfigError, STOP_ACTION_STOP, load_settings
 from still_watching.events import TICKS_PER_SECOND, parse_event
-from still_watching.jellyfin import JellyfinClient
+from still_watching.jellyfin import (
+    MESSAGE_REPEAT_COUNT,
+    MESSAGE_REPEAT_INTERVAL_SECONDS,
+    MESSAGE_TIMEOUT_MS,
+    JellyfinClient,
+)
 
 
 HTTP_OK = 200
@@ -119,15 +125,52 @@ def _client(stop_action=None):
     return JellyfinClient(load_settings(env), session=http, sleep=lambda _: None), http
 
 
-def test_ask_shows_message_then_pauses():
+MESSAGE_URL = "http://jf/Sessions/s1/Command"
+REPEATS = MESSAGE_REPEAT_COUNT
+
+
+class FailingHttp(RecordingHttp):
+    def __init__(self, failing_url):
+        super().__init__()
+        self._failing_url = failing_url
+        self._last_url = None
+
+    def post(self, url, json=None, headers=None, timeout=None):
+        self._last_url = url
+        return super().post(url, json=json, headers=headers, timeout=timeout)
+
+    def raise_for_status(self):
+        if self._last_url == self._failing_url:
+            raise requests.HTTPError("boom")
+
+
+def test_ask_pauses_then_repeats_the_message():
     jellyfin, http = _client()
 
     assert jellyfin.ask_still_watching("s1")
 
     urls = [call[0] for call in http.calls]
-    assert urls == ["http://jf/Sessions/s1/Command", "http://jf/Sessions/s1/Playing/Pause"]
-    assert http.calls[0][1]["Name"] == "DisplayMessage"
+    assert urls == ["http://jf/Sessions/s1/Playing/Pause"] + [MESSAGE_URL] * REPEATS
     assert all(call[2]["Authorization"] == 'MediaBrowser Token="t"' for call in http.calls)
+
+
+def test_every_message_carries_a_timeout():
+    jellyfin, http = _client()
+
+    jellyfin.ask_still_watching("s1")
+
+    messages = [call[1] for call in http.calls if call[0] == MESSAGE_URL]
+    assert len(messages) == REPEATS
+    assert all(m["Name"] == "DisplayMessage" and m["Arguments"]["TimeoutMs"] == str(MESSAGE_TIMEOUT_MS) for m in messages)
+
+
+def test_messages_are_spaced_by_the_repeat_interval():
+    sleeps = []
+    http = RecordingHttp()
+    settings = load_settings({"JELLYFIN_API_URL": "http://jf", "JELLYFIN_API_TOKEN": "t"})
+    JellyfinClient(settings, session=http, sleep=sleeps.append).ask_still_watching("s1")
+
+    assert sleeps == [MESSAGE_REPEAT_INTERVAL_SECONDS] * (REPEATS - 1)
 
 
 def test_ask_can_stop_and_go_home():
@@ -136,7 +179,16 @@ def test_ask_can_stop_and_go_home():
     jellyfin.ask_still_watching("s1")
 
     urls = [call[0] for call in http.calls]
-    assert urls[1:] == ["http://jf/Sessions/s1/Playing/Stop", "http://jf/Sessions/s1/Command/GoHome"]
+    assert urls[:2] == ["http://jf/Sessions/s1/Playing/Stop", "http://jf/Sessions/s1/Command/GoHome"]
+    assert urls[2:] == [MESSAGE_URL] * REPEATS
+
+
+def test_message_still_shows_when_pause_fails():
+    http = FailingHttp("http://jf/Sessions/s1/Playing/Pause")
+    settings = load_settings({"JELLYFIN_API_URL": "http://jf", "JELLYFIN_API_TOKEN": "t"})
+
+    assert not JellyfinClient(settings, session=http, sleep=lambda _: None).ask_still_watching("s1")
+    assert [call[0] for call in http.calls].count(MESSAGE_URL) == REPEATS
 
 
 def test_settings_read_prefixed_run_keys():

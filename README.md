@@ -1,45 +1,76 @@
-# sleep-timer
-A poor man's sleep timer for Jellyfin
+# still-watching
 
-This is just a small side-project, with a lot of room for improvement.  Feel free to submit Pull Requests.
+An "Are you still watching?" prompt for Jellyfin, driven by the official [Webhook plugin](https://github.com/jellyfin/jellyfin-plugin-webhook).
 
-## Summary
-Becasue most Jellyfin clients do not have a "Still Watching?" feature, I created a work-around.  This app leverages events from the official Jellyfin Webhook Plugin to count the number of episodes that any user has played on a specific device.  If more than 3 episodes have been played with less than one hour between start times, this will automatically stop playback of the fourth one.
+Forked from [joshjryan/sleep-timer](https://github.com/joshjryan/sleep-timer).
 
-## Requirements
-1. Start the docker container
-2. Install the [Jellyfin Webhook Plugin](https://github.com/jellyfin/jellyfin-plugin-webhook)
-3. Add a generic destination, with a Webhook URL of `http://{docker-address}:5553/webhook`
-4. Choose the "Playback Start" Notification Type, choose the users who will use this sleep timer, and click the "Send All Properties (ignores template)" checkbox
+## How it works
 
+still-watching follows each user on each device separately and counts runs of episodes.
 
-## Docker Compose Example
+- **An episode counts once it has played for a minute** (`STILL_WATCHING_START_DELAY_SECONDS`). Stopping it, or starting something else, inside that minute means it never counted, so skipping through episodes does not build up a run.
+- **The next episode continues the run if it starts within 10 minutes of the previous one ending** (`STILL_WATCHING_RUN_GAP_MINUTES`). The end comes from the `PlaybackStop` event. If no stop arrives, for example because the client disappeared, the previous episode is assumed to have ended at its start plus its running time.
+- **A different series, or any movie, starts a new run.**
+- **Resuming an episode that already counted does not count it again**, whether it was paused or stopped and restarted.
+- **When an episode would make the run longer than 4** (`STILL_WATCHING_RUN_LENGTH`), once that episode has played for the start delay, still-watching shows "Are you still watching?" on the client and then pauses it (`JELLYFIN_STOP_ACTION`). That episode becomes the first of a new run, so resuming it gives another full run before the next prompt.
 
-Here is an example of how to use `sleep-timer` with Docker Compose:
+With the defaults, four back-to-back episodes play through, and the fifth pauses a minute in.
+
+Run counts live in memory, so restarting the container resets them.
+
+## Setup
+
+1. Run the container (see below).
+2. Install the Jellyfin Webhook plugin.
+3. Add a **Generic** destination:
+   - **Webhook URL:** `http://<still-watching-address>:5553/webhook`
+   - **Notification types:** `Playback Start` and `Playback Stop`
+   - **Item types:** Episodes and Movies (movies reset the run)
+   - **Users:** the users to apply it to
+   - **Send All Properties (ignores template):** checked
+4. Create an API key in Jellyfin (Dashboard → API Keys) for `JELLYFIN_API_TOKEN`.
+
+## Configuration
+
+| Variable | Required | Default | Meaning |
+|---|---|---|---|
+| `JELLYFIN_API_URL` | yes | | Jellyfin server address, e.g. `http://jellyfin:8096` |
+| `JELLYFIN_API_TOKEN` | yes | | Jellyfin API key, sent as `Authorization: MediaBrowser Token="…"` |
+| `STILL_WATCHING_RUN_LENGTH` | no | `4` | Episodes in a row allowed before asking |
+| `STILL_WATCHING_RUN_GAP_MINUTES` | no | `10` | Longest break between one episode ending and the next starting that still continues a run |
+| `STILL_WATCHING_START_DELAY_SECONDS` | no | `60` | How long an episode must play before it counts |
+| `JELLYFIN_MESSAGE` | no | `Are you still watching?` | Message shown on the client |
+| `JELLYFIN_STOP_ACTION` | no | `PAUSE` | `PAUSE`, or `STOP` to stop playback and return the client to its home screen |
+
+## Docker Compose
 
 ```yaml
-version: '3.8'
-
 services:
-  sleep-timer:
-    image: joshjryan/jf-sleep-timer:latest
-    container_name: jf-sleep-timer
+  still-watching:
+    image: ghcr.io/ste-haus/still-watching:latest
+    container_name: still-watching
     ports:
       - "5553:5553"
     environment:
-      # Required. Address of your jellyfin server (e.g. http://192.168.1.100:8096)
-      JELLYFIN_API_URL: "value1"
-      # Required. API Key generated from your jellyfin server
-      JELLYFIN_API_TOKEN: "value2"
-      # Optional. Number of minutes after an episode starts that a subsequent play will be consideder in-a-row.
-      EPISODE_START_INTERVAL: 60
-      # Optional. Number of minutes after an episode won't count as skimmed (will count the episode as viewed). Default value is 1 min.
-      EPISODE_SKIMMING_DURATION: 1
-      # Optional. Stop playback when this episode starts.
-      EPISODE_COUNT: 4
-      # Optional. Message to be displayed before playback stop.
-      JELLYFIN_MESSAGE: "Are you still watching ?"
-      # Optional. STOP / PAUSE playback
-      JELLYFIN_STOP_ACTION: "PAUSE" # Options STOP or PAUSE 
+      JELLYFIN_API_URL: "http://jellyfin:8096"
+      JELLYFIN_API_TOKEN: "<api key>"
+      STILL_WATCHING_RUN_LENGTH: 4
+      STILL_WATCHING_RUN_GAP_MINUTES: 10
+      STILL_WATCHING_START_DELAY_SECONDS: 60
+      JELLYFIN_STOP_ACTION: "PAUSE"
     restart: unless-stopped
 ```
+
+The image runs a single gunicorn worker on purpose: run counts are held in that process's memory.
+
+## Development
+
+```bash
+make install   # runtime and test dependencies
+make test      # pytest
+make publish   # build and push ghcr.io/ste-haus/still-watching:<VERSION> and :latest
+```
+
+## Releases
+
+Every push to `main` runs the tests, then builds and pushes `ghcr.io/ste-haus/still-watching` tagged with the version in `VERSION`, its `major.minor` series, `latest`, and `sha-<commit>`, and then tags the commit `v<VERSION>`. The build fails if that tag already exists, so bump `VERSION` in every pull request.
